@@ -1,0 +1,151 @@
+name: "ChRIS Store Upload"
+description: "Upload a ChRIS plugin's JSON representation to the ChRIS Store"
+author: "FNNDSC"
+
+inputs:
+  description_file:
+    description: Path to JSON representation of ChRIS plugin
+    required: false
+    default: ''
+  description_json:
+    description: JSON description of ChRIS plugin
+    required: false
+    default: ''
+  dock_image:
+    description: OCI image tag
+    required: false
+  name:
+    description: Plugin name
+    required: false
+    default: ''
+  public_repo:
+    description: Source code repository URL
+    required: false
+    default: ''
+  chris_url:
+    description: 'ChRIS backend URL'
+    required: false
+    default: 'https://cube.chrisproject.org/api/v1/'
+  username:
+    description: 'ChRIS username. The user must be an admin.'
+    required: true
+  password:
+    description: 'ChRIS user password'
+    required: true
+  compute_names:
+    description: 'Names of the compute resources to register the plugin to. Multiple names should be separated by commas.'
+    required: true
+  container_command:
+    description: 'Command used to run containers. [docker, podman]'
+    required: false
+    default: 'docker'
+  pull:
+    description: 'Pull image before running ("always", "missing", "never")'
+    required: false
+    default: 'never'
+
+outputs:
+  id:
+    description: "plugin ID"
+    value: "${{ steps.cube.outputs.id }}"
+  url:
+    description: "plugin URL"
+    value: "${{ steps.cube.outputs.href }}"
+  title:
+    description: "plugin title"
+    value: "${{ steps.cube.outputs.title }}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create plugin description
+      id: description
+      shell: python
+      run: |
+        import os, sys, shlex
+        import subprocess as sp
+        from tempfile import NamedTemporaryFile
+
+        given_description_file = r'${{ inputs.given_description_file }}'
+        given_description_json = rb'${{ inputs.given_description_json }}'
+        given_public_repo = r'${{ inputs.public_repo }}'
+        given_plugin_name = r'${{ inputs.name }}'
+        dock_image = r'${{ inputs.dock_image }}'
+
+        if given_public_repo:
+            public_repo = given_public_repo
+        else:
+            public_repo = f'${{ github.server_url }}/${{ github.repository }}'
+
+        def die(msg):
+            print('::error ::' + msg, flush=True)
+            sys.exit(1)
+
+        def run_python_chris_plugin_info_in_docker(out):
+            ctr_cmd = [r'${{ inputs.container_command }}', 'run', '--rm', '--pull', r'${{ inputs.pull }}', dock_image]
+            cpi_cmd = ['chris_plugin_info',  '--dock-image', dock_image]
+            if given_plugin_name:
+                cpi_cmd += ['--name', given_plugin_name]
+            if given_public_repo:
+                cpi_cmd += ['--public-repo', given_public_repo]
+            cmd = ctr_cmd + cpi_cmd
+            proc = sp.run(cmd, stdout=out)
+            if proc.returncode != 0:
+                die(f'Command {shlex.join(cmd)} returned with code {proc.returncode}')
+
+        with NamedTemporaryFile(suffix='.json', delete=False) as tmp:
+            if given_description_json:
+                tmp.write(given_description_json)
+            elif given_description_file:
+                if not os.path.isfile(given_description_file):
+                    die(f'"{given_description_file}" is not a file')
+                os.symlink(os.path.realpath(given_description_file), tmp.name)
+            else:
+                if not dock_image:
+                    die('One of "description_file", "description_json", or "dock_image" must be given.')
+                run_python_chris_plugin_info_in_docker(tmp)
+
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+            out.write(f'file={tmp.name}\n')
+
+    - name: Upload plugin to CUBE
+      id: cube
+      shell: bash
+      run: |
+        auth='${{ inputs.username }}:${{ inputs.password }}'
+        admin_url="$(curl -sSf -u "$auth" '${{ inputs.chris_url }}' -H 'Accept: application/json' | jq -r '.collection_links.admin')"
+        if [ "$admin_url" = "null" ]; then
+          echo "::error ::${{ inputs.username }} is not an admin for ${{ inputs.chris_url }}"
+          exit 1
+        fi
+
+        set +e
+        res="$(
+          curl -sS --fail-with-body -u "$auth" "$admin_url" \
+            -H 'Accept: application/json' \
+            -F fname=@- \
+            -F compute_names='${{ inputs.compute_names }}' \
+            < '${{ steps.description.outputs.file }}'
+        )"
+        rc=$?
+
+        if [ "$rc" != "0" ]; then
+          echo "Description >>>"
+          cat '${{ steps.description.outputs.file }}'
+          echo "Response >>>"
+          echo "$res"
+
+          echo "::error ::Failed to upload plugin to $admin_url"
+          exit "$rc"
+        fi
+
+        echo "id=$(jq -r .id <<< "$res")" >> "$GITHUB_OUTPUT"
+        echo "url=$(jq -r .url <<< "$res")" >> "$GITHUB_OUTPUT"
+        echo "title=$(jq -r .title <<< "$res")" >> "$GITHUB_OUTPUT"
+    - name: Clean up temporary file
+      shell: bash
+      run: rm '${{ steps.description.outputs.file }}'
+
+branding:
+  color: "blue"
+  icon: "shopping-bag"

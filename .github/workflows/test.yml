@@ -1,0 +1,40 @@
+name: test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build examples
+        uses: docker/build-push-action@v5
+        with:
+          context: https://github.com/FNNDSC/chris_plugin.git#:examples/pl-replace
+          tags: localhost/fnndsc/pl-copy:1.0.0
+          load: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Upload to testing ChRIS
+        id: upload
+        uses: ./
+        with:
+          name: test-upload-chris-plugin-${{ github.run_id }}-${{ github.run_number }}
+          dock_image: localhost/fnndsc/pl-copy:1.0.0
+          compute_names: dummy
+          chris_url: ${{ secrets.TESTING_CUBE_URL }}
+          username: ${{ secrets.TESTING_CUBE_USERNAME }}
+          password: ${{ secrets.TESTING_CUBE_PASSWORD }}
+      - name: Show output variables
+        run: |
+          echo "id=${{ steps.upload.outputs.id }}"
+          echo "url=${{ steps.upload.outputs.url }}"
+          echo "title=${{ steps.upload.outputs.title }}"
+      
+      # cannot delete plugin via API...
