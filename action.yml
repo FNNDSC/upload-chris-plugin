@@ -99,6 +99,7 @@ runs:
             elif given_description_file:
                 if not os.path.isfile(given_description_file):
                     die(f'"{given_description_file}" is not a file')
+                os.unlink(tmp.name)
                 os.symlink(os.path.realpath(given_description_file), tmp.name)
             else:
                 if not dock_image:
