@@ -66,8 +66,8 @@ runs:
         import subprocess as sp
         from tempfile import NamedTemporaryFile
 
-        given_description_file = r'${{ inputs.given_description_file }}'
-        given_description_json = rb'${{ inputs.given_description_json }}'
+        given_description_file = r'${{ inputs.description_file }}'
+        given_description_json = rb'${{ inputs.description_json }}'
         given_public_repo = r'${{ inputs.public_repo }}'
         given_plugin_name = r'${{ inputs.name }}'
         dock_image = r'${{ inputs.dock_image }}'
